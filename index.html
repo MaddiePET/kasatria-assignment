@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Kasatria People Table</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+  :root{
+    --bg:#000;
+    --panel:#0d0d0d;
+    --accent:#4fa3ff;
+  }
+  html,body{
+    margin:0; height:100%; background:var(--bg); color:#eee;
+    font-family:"Trebuchet MS", Helvetica, Arial, sans-serif;
+    overflow:hidden;
+  }
+
+  /* ---------- Login screen ---------- */
+  #login-screen{
+    position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    background:radial-gradient(circle at 50% 40%, #101820 0%, #000 70%);
+    z-index:50;
+  }
+  #login-card{
+    width:340px; padding:36px 28px; border-radius:14px;
+    background:#111; border:1px solid #262626; text-align:center;
+    box-shadow:0 20px 60px rgba(0,0,0,.6);
+  }
+  #login-card h1{ font-size:20px; margin:0 0 6px; }
+  #login-card p{ font-size:13px; color:#999; margin:0 0 22px; }
+  #g_id_signin_container{ display:flex; justify-content:center; }
+  #login-fallback-btn{
+    display:inline-flex; align-items:center; gap:10px; background:#fff; color:#3c4043;
+    border:1px solid #dadce0; border-radius:20px; padding:10px 18px; font-size:14px;
+    font-weight:500; cursor:pointer;
+  }
+  #login-note{ margin-top:18px; font-size:11px; color:#666; line-height:1.5; }
+  #login-note code{ background:#1c1c1c; padding:1px 5px; border-radius:4px; }
+
+  /* ---------- App chrome ---------- */
+  #app{ display:none; height:100%; }
+  #topbar{
+    position:fixed; top:0; left:0; right:0; height:56px; z-index:20;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:0 18px; background:linear-gradient(to bottom, rgba(0,0,0,.85), rgba(0,0,0,0));
+  }
+  #topbar h2{ font-size:15px; margin:0; font-weight:600; letter-spacing:.5px; color:#ddd; }
+  #whoami{ display:flex; align-items:center; gap:8px; font-size:12px; color:#aaa; }
+  #whoami img{ width:26px; height:26px; border-radius:50%; }
+  #legend{
+    position:fixed; top:56px; left:18px; z-index:20; font-size:11px; color:#bbb;
+    display:flex; gap:14px; align-items:center; background:rgba(0,0,0,.5);
+    padding:6px 12px; border-radius:20px;
+  }
+  #legend span{ display:flex; align-items:center; gap:5px; }
+  .swatch{ width:10px; height:10px; border-radius:2px; display:inline-block; }
+
+  #menu{
+    position:fixed; bottom:24px; left:0; right:0; z-index:20;
+    display:flex; justify-content:center; gap:10px;
+  }
+  #menu button{
+    background:rgba(20,20,20,.85); color:#ccc; border:1px solid #333;
+    padding:8px 20px; font-size:12px; letter-spacing:1px; border-radius:20px;
+    cursor:pointer; transition:.15s;
+  }
+  #menu button:hover{ background:#222; color:#fff; }
+  #menu button.active{ background:var(--accent); color:#001225; border-color:var(--accent); font-weight:600; }
+
+  #status{
+    position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    color:#888; font-size:13px; z-index:15; pointer-events:none;
+  }
+
+  #container{ position:absolute; top:0; left:0; right:0; bottom:0; }
+
+  /* ---------- Element / person tile ---------- */
+  .element{
+    width:120px; height:160px; box-shadow:0 0 12px rgba(0,0,0,.5);
+    border:1px solid rgba(255,255,255,.35); border-radius:6px;
+    font-family:"Trebuchet MS", Helvetica, Arial, sans-serif;
+    text-align:center; cursor:default; color:#fff;
+  }
+  .element .photo-wrap{
+    width:100%; height:78px; overflow:hidden; border-radius:5px 5px 0 0;
+    background:#000; display:flex; align-items:center; justify-content:center;
+  }
+  .element .photo-wrap img{ width:100%; height:100%; object-fit:cover; display:block; }
+  .element .photo-wrap .no-photo{ font-size:26px; color:rgba(255,255,255,.6); }
+  .element .details{
+    padding:5px 4px 2px;
+  }
+  .element .country-age{
+    position:absolute; top:4px; left:6px; font-size:9px; opacity:.85;
+  }
+  .element .name{
+    font-size:11px; font-weight:bold; line-height:1.15; margin-top:2px;
+    max-height:28px; overflow:hidden;
+  }
+  .element .interest{
+    font-size:9px; opacity:.85; margin-top:2px;
+  }
+  .element .networth{
+    font-size:10px; font-weight:bold; margin-top:3px;
+  }
+</style>
+</head>
+<body>
+
+  <!-- ============ LOGIN SCREEN ============ -->
+  <div id="login-screen">
+    <div id="login-card">
+      <h1>Welcome Back</h1>
+      <p>Sign in to view the Kasatria People Table</p>
+      <div id="g_id_signin_container"></div>
+      <button id="login-fallback-btn" style="display:none">Continue without Google Sign-In (dev mode)</button>
+      <div id="login-note">
+        Configure your OAuth Client ID in <code>config.js</code> to enable<br/>
+        "Sign in with Google". See SETUP_GUIDE.md.
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ MAIN APP ============ -->
+  <div id="app">
+    <div id="topbar">
+      <h2>KASATRIA PEOPLE TABLE</h2>
+      <div id="whoami"></div>
+    </div>
+    <div id="legend">
+      <span><i class="swatch" style="background:#e53935"></i> &lt; $100K</span>
+      <span><i class="swatch" style="background:#fb8c00"></i> $100K – $200K</span>
+      <span><i class="swatch" style="background:#43a047"></i> &gt; $200K</span>
+    </div>
+    <div id="status">Loading data…</div>
+    <div id="container"></div>
+    <div id="menu">
+      <button data-mode="table" class="active">TABLE</button>
+      <button data-mode="sphere">SPHERE</button>
+      <button data-mode="helix">HELIX</button>
+      <button data-mode="grid">GRID</button>
+    </div>
+  </div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script src="config.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
