@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { CSS3DRenderer, CSS3DObject } from "three/addons/renderers/CSS3DRenderer.js";
 import { TrackballControls } from "three/addons/controls/TrackballControls.js";
 import TWEEN from "three/addons/libs/tween.module.js";
+import { parseCsv, normalizeRecord, colorForNetWorth } from "./utils.js";
 
 const CONFIG = window.APP_CONFIG || {};
 
@@ -50,78 +51,81 @@ if (CONFIG.GOOGLE_CLIENT_ID) {
 }
 
 /* ============================================================================
- * 2. DATA — load from the published Google Sheet CSV.
+ * 2. DATA — load from the published Google Sheet CSV
  * ==========================================================================*/
-function parseCsv(text) {
-  // Minimal RFC4180-ish CSV parser (handles quoted fields with commas).
-  const rows = [];
-  let row = [], field = "", inQuotes = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (inQuotes) {
-      if (c === '"') {
-        if (text[i + 1] === '"') { field += '"'; i++; }
-        else inQuotes = false;
-      } else field += c;
-    } else {
-      if (c === '"') inQuotes = true;
-      else if (c === ",") { row.push(field); field = ""; }
-      else if (c === "\n" || c === "\r") {
-        if (c === "\r" && text[i + 1] === "\n") i++;
-        row.push(field); field = "";
-        if (row.some((f) => f.trim() !== "")) rows.push(row);
-        row = [];
-      } else field += c;
-    }
-  }
-  if (field.length || row.length) { row.push(field); rows.push(row); }
-  const header = rows.shift().map((h) => h.trim().toLowerCase());
-  return rows.map((r) => {
-    const obj = {};
-    header.forEach((h, idx) => (obj[h] = (r[idx] || "").trim()));
-    return obj;
+function showFatalError(message) {
+  const statusEl = document.getElementById("status");
+  statusEl.style.display = "flex";
+  statusEl.style.color = "#ff6b6b";
+  statusEl.style.pointerEvents = "auto";
+  statusEl.style.flexDirection = "column";
+  statusEl.style.gap = "10px";
+  statusEl.style.textAlign = "center";
+  statusEl.style.padding = "0 20px";
+  statusEl.innerHTML = `
+    <div style="font-size:14px; max-width:420px;">⚠ Couldn't load the data.<br/>${message}</div>
+    <button id="retry-load-btn" style="background:#222;color:#fff;border:1px solid #444;border-radius:16px;padding:8px 18px;font-size:12px;cursor:pointer;">Retry</button>
+  `;
+  document.getElementById("retry-load-btn").addEventListener("click", () => {
+    statusEl.style.color = "";
+    statusEl.style.pointerEvents = "none";
+    populateFromData();
   });
 }
 
-function normalizeRecord(raw) {
-  const nwRaw = raw["net worth"] ?? raw[" net worth "] ?? "";
-  const netWorth =
-    raw.networth !== undefined
-      ? Number(raw.networth)
-      : parseFloat(String(nwRaw).replace(/[^0-9.-]/g, "")) || 0;
-  return {
-    name: raw.name || "",
-    photo: raw.photo || "",
-    age: raw.age || "",
-    country: raw.country || "",
-    interest: raw.interest || "",
-    netWorth,
-    netWorthDisplay: raw.networthdisplay || nwRaw || `$${netWorth.toLocaleString()}`,
-  };
+/**
+ * Loads the data, builds the CSS3D tiles, and animates
+ * them into the Table layout. Split out from initScene() so the "Retry"
+ * button on a failed load can re-run just this part without recreating the
+ * whole three.js scene/camera/controls.
+ */
+function populateFromData() {
+  loadData()
+    .then((people) => {
+      // Clear out any tiles from a previous failed/retried attempt before
+      // rebuilding, so retrying never duplicates tiles.
+      objects.forEach((obj) => scene.remove(obj));
+      objects.length = 0;
+
+      createObjects(people);
+      computeTargets(people.length);
+      transform(targets.table, 1500);
+    })
+    .catch((err) => {
+      console.error("Failed to load people data:", err);
+      showFatalError(err.message || String(err));
+    });
 }
 
 async function loadData() {
   const statusEl = document.getElementById("status");
+  statusEl.style.display = "flex";
   try {
     if (CONFIG.SHEET_CSV_URL) {
       statusEl.textContent = "Loading data from Google Sheet…";
       const res = await fetch(CONFIG.SHEET_CSV_URL);
-      if (!res.ok) throw new Error("Sheet fetch failed: " + res.status);
+      if (!res.ok) {
+        throw new Error(
+          `Google Sheet returned HTTP ${res.status}. Double-check SHEET_CSV_URL in config.js is the ` +
+          `"Publish to web" CSV link and that the sheet is still published.`
+        );
+      }
       const text = await res.text();
-      return parseCsv(text).map(normalizeRecord);
+      const rows = parseCsv(text).map(normalizeRecord);
+      if (rows.length === 0) {
+        throw new Error("The Sheet returned 0 rows — check the published tab has data in it.");
+      }
+      return rows;
     }
+    
+    statusEl.textContent = "SHEET_CSV_URL not set — loading bundled data.json…";
+    const res = await fetch("./data.json");
+    if (!res.ok) throw new Error("data.json fallback failed to load (HTTP " + res.status + ").");
+    return await res.json();
   } finally {
+
     statusEl.style.display = "none";
   }
-}
-
-/* ============================================================================
- * 3. TILE COLOR — Red < $100K, Orange $100K–$200K, Green > $200K
- * ==========================================================================*/
-function colorForNetWorth(v) {
-  if (v < 100000) return "#e53935"; // red
-  if (v < 200000) return "#fb8c00"; // orange
-  return "#43a047"; // green
 }
 
 function buildTileElement(person) {
@@ -168,8 +172,8 @@ function initScene() {
   const container = document.getElementById("container");
 
   camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 1, 10000);
-  // A small default elevation so Sphere, Helix and Grid read as 3D shapes immediately, without requiring the
-  // viewer to drag-rotate first. Table/Grid still look correct at this angle.
+  // A small default elevation so Sphere, Helix and Grid read as 3D shapes immediately, 
+  // Table/Grid still look correct at this angle.
   camera.position.set(0, 650, 2850);
   camera.lookAt(0, 0, 0);
 
@@ -184,11 +188,7 @@ function initScene() {
   controls.maxDistance = 8000;
   controls.addEventListener("change", render);
 
-  loadData().then((people) => {
-    createObjects(people);
-    computeTargets(people.length);
-    transform(targets.table, 1500);
-  });
+  populateFromData();
 
   document.querySelectorAll("#menu button").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -206,6 +206,8 @@ function createObjects(people) {
   people.forEach((person) => {
     const el = buildTileElement(person);
     const object = new CSS3DObject(el);
+    // scatter starting position randomly in a sphere shell so the first
+    // "table" transform reads as an assembly animation
     object.position.x = Math.random() * 4000 - 2000;
     object.position.y = Math.random() * 4000 - 2000;
     object.position.z = Math.random() * 4000 - 2000;
@@ -255,7 +257,7 @@ function computeSphereTargets(count) {
   return list;
 }
 
-/* ---- DOUBLE HELIX : two interleaved strands 180deg apart --*/
+/* ---- DOUBLE HELIX : two interleaved strands 180deg apart ---- */
 function computeHelixTargets(count) {
   const list = [];
   const radius = 1400; // wider tube so 120px-wide tiles don't crowd each other around the circumference
